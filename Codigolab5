@@ -1,0 +1,151 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <math.h>
+#include "interfaz.h" 
+
+// --- Configuración y Variables Globales ---
+const char* ssid = "Yuniqua";
+const char* pass = "Soypobre";
+
+WebServer server(80);
+
+const int pinUnico = 36; 
+int modo = 3; // 1: Temperatura, 2: Luminancia, 3: Peso
+
+float v_temp = 0.0, calc_temp = 0.0;
+float v_lux  = 0.0, calc_lux  = 0.0;
+float v_peso = 0.0, calc_peso = 0.0;
+
+// --- Procesamiento de Sensores y Modos ---
+void procesarSensores() {
+  int numMuestras = 25;
+  float sumaV = 0;
+
+  for (int i = 0; i < numMuestras; i++) {
+    sumaV += analogRead(pinUnico) * (3.3 / 4095.0);
+    delay(15);
+  }
+
+  float V_promedio = sumaV / numMuestras;
+
+  // Modo 1: Temperatura
+  if (modo == 1) {
+    v_temp = V_promedio;
+
+    if (v_temp <= 1.700) {
+      calc_temp = 25.0;
+    } else {
+      calc_temp = 19.14119f - log(3.43430358f / (v_temp + 0.16268889f) - 1.0f) / 0.03209127f;
+    }
+
+    if (calc_temp < 25.0) { calc_temp = 25.0; }
+
+    calc_lux  = 0.0; v_lux  = 0.0;
+    calc_peso = 0.0; v_peso = 0.0;
+  }
+  
+  // Modo 2: Luminancia
+  else if (modo == 2) {
+    v_lux = V_promedio;
+    
+    if (v_lux <= 0.00001) {
+      calc_lux = 1.0;
+    } else if (v_lux >= 3.209) {
+      calc_lux = 1000.0;
+    } else {
+      calc_lux = -5490.7589f - log(2852.851374f / (v_lux + 2848.085444f) - 1.0f) / 0.00116412f;
+    }
+    
+    if (calc_lux > 1000.0) { calc_lux = 1000.0; }
+    if (calc_lux < 1.0)    { calc_lux = 1.0; }
+    
+    calc_temp = 0.0; v_temp = 0.0;
+    calc_peso = 0.0; v_peso = 0.0;
+  }
+  
+  // Modo 3: Peso
+  else if (modo == 3) {
+    v_peso = V_promedio;
+
+    if (v_peso <= 0.010) {
+      calc_peso = 100.0;
+    } else if (v_peso <= 0.044) {
+      calc_peso = 1470.5882f * v_peso + 85.2941f;
+    } else if (v_peso <= 0.350) {
+      calc_peso = 163.3987f * v_peso + 142.8105f;
+    } else if (v_peso <= 0.880) {
+      calc_peso = 94.3396f * v_peso + 166.9811f;
+    } else if (v_peso <= 2.090) {
+      calc_peso = 173.488196f * v_peso * v_peso * v_peso
+                - 699.102607f * v_peso * v_peso
+                + 1073.507764f * v_peso
+                - 269.794375f;
+    } else if (v_peso <= 2.100) { calc_peso = 5000.0000f * v_peso - 9950.0000f;
+    } else if (v_peso <= 2.230) { calc_peso =  384.6154f * v_peso -  257.6923f;
+    } else if (v_peso <= 2.300) { calc_peso =  714.2857f * v_peso -  992.8571f;
+    } else if (v_peso <= 2.350) { calc_peso = 1000.0000f * v_peso - 1650.0000f;
+    } else if (v_peso <= 2.490) { calc_peso =  714.2857f * v_peso -  978.5714f;
+    } else if (v_peso <= 2.570) { calc_peso = 1250.0000f * v_peso - 2312.5000f;
+    } else if (v_peso <= 2.600) { calc_peso = 3333.3333f * v_peso - 7666.6667f;
+    } else {
+      calc_peso = 1000.0;
+    }
+
+    if (calc_peso > 1000.0) calc_peso = 1000.0;
+    if (calc_peso < 100.0)  calc_peso = 100.0;
+
+    calc_temp = 0.0; v_temp = 0.0;
+    calc_lux  = 0.0; v_lux  = 0.0;
+  }
+}
+
+// --- Rutas del Servidor Web ---
+void rutaRaiz() {
+  procesarSensores();
+  String html = String(RESPUESTA_HTML);
+  
+  html.replace("%TEMP%",   String(calc_temp, 2));   html.replace("%V_TEMP%", String(v_temp, 3));
+  html.replace("%LUX%",    String(calc_lux, 2));    html.replace("%V_LUX%",  String(v_lux, 3));
+  html.replace("%PESO%",   String(calc_peso, 2));   html.replace("%V_PESO%", String(v_peso, 3));
+  
+  server.send(200, "text/html", html);
+}
+
+void rutaDatos() {
+  procesarSensores();
+  String json = "{";
+  json += "\"temp\":\""   + String(calc_temp, 2) + "\",\"v_temp\":\"" + String(v_temp, 3) + "\",";
+  json += "\"lux\":\""    + String(calc_lux, 2)  + "\",\"v_lux\":\""  + String(v_lux, 3)  + "\",";
+  json += "\"peso\":\""   + String(calc_peso, 2) + "\",\"v_peso\":\"" + String(v_peso, 3) + "\"";
+  json += "}";
+  
+  server.send(200, "application/json", json);
+}
+
+// --- Inicialización y Bucle Principal ---
+void setup() {
+  Serial.begin(115200);
+  analogReadResolution(12);
+
+  Serial.println("\nConectando a la red WiFi...");
+  WiFi.begin(ssid, pass);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\n¡Conexión establecida con éxito!");
+  Serial.print("Escribe esto en tu navegador: http://");
+  Serial.println(WiFi.localIP());
+
+  server.on("/", rutaRaiz);
+  server.on("/data", rutaDatos); 
+  
+  server.begin();
+  Serial.println("Servidor web HTTP iniciado.");
+}
+
+void loop() {
+  server.handleClient();
+}
