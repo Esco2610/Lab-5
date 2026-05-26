@@ -1,0 +1,266 @@
+// Pestaña: interfaz.h
+
+const char RESPUESTA_HTML[] PROGMEM = R"=====(
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" charset="UTF-8">
+    <title>Dashboard - Datalogger Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: #1e222b; 
+            color: #f5f6fa; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            padding: 20px 10px;
+        }
+        .header { text-align: center; margin-bottom: 20px; }
+        .header h1 { font-size: 26px; color: #4fa8ff; }
+        
+        /* Estilo para el reloj digital */
+        .reloj-digital {
+            font-family: monospace;
+            background: #21242b;
+            color: #98be65;
+            padding: 6px 14px;
+            border-radius: 6px;
+            display: inline-block;
+            margin-top: 8px;
+            font-size: 14px;
+            border: 1px solid #3e4451;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 900px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .card { 
+            background: #282c34; 
+            padding: 20px; 
+            border-radius: 12px; 
+            box-shadow: 0 6px 12px rgba(0,0,0,0.2); 
+            text-align: center;
+            border-left: 5px solid #51afef;
+        }
+        .card.temp { border-left-color: #ff6c6b; }
+        .card.lux { border-left-color: #da8548; }
+        .card.peso { border-left-color: #98be65; }
+        
+        .card h3 { font-size: 14px; text-transform: uppercase; color: #a0a7b5; }
+        .value { font-size: 32px; font-weight: bold; margin: 5px 0; }
+        
+        .card.temp .value { color: #ff6c6b; }
+        .card.lux .value { color: #da8548; }
+        .card.peso .value { color: #98be65; }
+        
+        .voltage { 
+            font-size: 12px; color: #6272a4; background: #21242b;
+            padding: 4px 10px; border-radius: 15px; display: inline-block;
+        }
+        
+        .chart-container {
+            width: 100%;
+            max-width: 900px;
+            background: #282c34;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+            text-align: center;
+        }
+        
+        .button-group {
+            margin-top: 15px;
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+        .btn {
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn-reset { background: #ff6c6b; }
+        .btn-reset:hover { background: #e05655; }
+        .btn-csv { background: #98be65; color: #1e222b; }
+        .btn-csv:hover { background: #81a453; }
+        
+        .footer { margin-top: 30px; font-size: 11px; color: #5b6268; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Laboratorio de Instrumentación</h1>
+        <div class="reloj-digital" id="relojWeb">Cargando Tiempo Real...</div>
+    </div>
+
+    <div class="container">
+        <div class="card temp">
+            <h3>Temperatura</h3>
+            <div class="value"><span id="val_temp">%TEMP%</span> °C</div>
+            <div class="voltage">V: <span id="v_temp">%V_TEMP%</span> V</div>
+        </div>
+        <div class="card lux">
+            <h3>Luminancia</h3>
+            <div class="value"><span id="val_lux">%LUX%</span> Lux</div>
+            <div class="voltage">V: <span id="v_lux">%V_LUX%</span> V</div>
+        </div>
+        <div class="card peso">
+            <h3>Peso / Fuerza</h3>
+            <div class="value"><span id="val_peso">%PESO%</span> g</div>
+            <div class="voltage">V: <span id="v_peso">%V_PESO%</span> V</div>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="graficaVoltajeVsMedida" style="max-height: 350px;"></canvas>
+        <div class="button-group">
+            <button class="btn btn-reset" onclick="limpiarGrafica()">Limpiar Historial CSV</button>
+            <button class="btn btn-csv" onclick="exportarCSV()">Exportar a CSV</button>
+        </div>
+    </div>
+
+    <div class="footer">Universidad Distrital Francisco José de Caldas</div>
+
+    <script>
+        const ctx = document.getElementById('graficaVoltajeVsMedida').getContext('2d');
+        const miGrafica = new Chart(ctx, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'Curva Inversa de Calibración',
+                    data: [], 
+                    borderColor: '#4fa8ff',
+                    backgroundColor: 'rgba(79, 168, 255, 0.05)',
+                    borderWidth: 2,
+                    tension: 0.1,
+                    pointBackgroundColor: '#ffffff',
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        type: 'linear',
+                        position: 'bottom',
+                        title: { display: true, text: 'Voltaje de Entrada (V)', color: '#a0a7b5' },
+                        grid: { color: '#3e4451' },
+                        ticks: { color: '#a0a7b5' }
+                    },
+                    y: {
+                        title: { display: true, text: 'Valor Mensurando', color: '#a0a7b5' },
+                        grid: { color: '#3e4451' },
+                        ticks: { color: '#a0a7b5' }
+                    }
+                },
+                plugins: {
+                    legend: { labels: { color: '#f5f6fa' } }
+                }
+            }
+        });
+
+        // MODIFICACIÓN CLAVE: Vacía por completo el buffer del arreglo y refresca los ejes
+        function limpiarGrafica() {
+            miGrafica.data.datasets[0].data = []; 
+            miGrafica.update('reset'); // Resetea los estados de animación visual internos昌tiva
+            miGrafica.update();        // Fuerza el redibujado de ejes vacíos
+        }
+
+        // FUNCIÓN DE EXPORTACIÓN CON TIEMPO INCLUIDO
+        function exportarCSV() {
+            let listaPuntos = miGrafica.data.datasets[0].data;
+            if (listaPuntos.length === 0) {
+                alert("¡No hay datos para exportar!");
+                return;
+            }
+
+            let nombreMensurando = "Mensurando";
+            if (parseFloat(document.getElementById('v_temp').innerText) > 0) nombreMensurando = "Temperatura (C)";
+            else if (parseFloat(document.getElementById('v_lux').innerText) > 0) nombreMensurando = "Luminancia (Lux)";
+            else if (parseFloat(document.getElementById('v_peso').innerText) > 0) nombreMensurando = "Peso (g)";
+
+            // Añadimos la columna Fecha/Hora al inicio del encabezado
+            let csvContenido = "Fecha/Hora,Voltaje (V)," + nombreMensurando + "\r\n";
+            
+            listaPuntos.forEach(function(punto) {
+                // Se concatena la estampa de tiempo guardada en cada punto de la gráfica
+                csvContenido += punto.time + "," + punto.x.toFixed(3) + "," + punto.y.toFixed(2) + "\r\n";
+            });
+
+            let blob = new Blob([csvContenido], { type: 'text/csv;charset=utf-8;' });
+            let link = document.createElement("a");
+            let url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", "registro_instrumentacion.csv");
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // BUCLE PRINCIPAL DE REFRESCO E INSTRUMENTACIÓN (MUESTREO ESTRICTO CADA 1 SEGUNDO)
+        setInterval(function() {
+            // 1. Mantener actualizado el reloj digital de la cabecera
+            let ahora = new Date();
+            let tiempoStr = ahora.toLocaleDateString() + " " + ahora.toLocaleTimeString();
+            document.getElementById('relojWeb').innerText = tiempoStr;
+
+            // 2. Pedir datos al ESP32
+            fetch('/data').then(response => response.json()).then(data => {
+                document.getElementById('val_temp').innerText = data.temp;
+                document.getElementById('v_temp').innerText = data.v_temp;
+                document.getElementById('val_lux').innerText = data.lux;
+                document.getElementById('v_lux').innerText = data.v_lux;
+                document.getElementById('val_peso').innerText = data.peso;
+                document.getElementById('v_peso').innerText = data.v_peso;
+
+                let xVal = 0.0; let yVal = 0.0;
+                let modoActivo = false;
+
+                if (parseFloat(data.v_temp) > 0 || parseFloat(data.temp) > 0) {
+                    xVal = parseFloat(data.v_temp); yVal = parseFloat(data.temp);
+                    miGrafica.data.datasets[0].borderColor = '#ff6c6b';
+                    modoActivo = true;
+                } else if (parseFloat(data.v_lux) > 0 || parseFloat(data.lux) > 0) {
+                    xVal = parseFloat(data.v_lux); yVal = parseFloat(data.lux);
+                    miGrafica.data.datasets[0].borderColor = '#da8548';
+                    modoActivo = true;
+                } else if (parseFloat(data.v_peso) > 0 || parseFloat(data.peso) > 0) {
+                    xVal = parseFloat(data.v_peso); yVal = parseFloat(data.peso);
+                    miGrafica.data.datasets[0].borderColor = '#98be65';
+                    modoActivo = true;
+                }
+
+                if (modoActivo) {
+                    let dataset = miGrafica.data.datasets[0].data;
+                    
+                    // Se agrega el punto de forma directa cada segundo sin filtrar duplicados
+                    dataset.push({
+                        x: xVal, 
+                        y: yVal, 
+                        time: tiempoStr
+                    });
+                    
+                    // Removido el ordenamiento para garantizar secuencia temporal exacta en el CSV
+                    miGrafica.update('none');
+                }
+            }).catch(err => console.log(err));
+        }, 1000);
+    </script>
+</body>
+</html>
+)====="; 
